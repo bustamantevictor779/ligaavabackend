@@ -5,20 +5,20 @@ const pool = require('../config/database');
 // Login
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { username, password } = req.body;
 
     // Validar que los datos estén presentes
-    if (!email || !password) {
+    if (!username || !password) {
       return res.status(400).json({
         success: false,
-        message: 'Email y contraseña son requeridos'
+        message: 'Usuario y contraseña son requeridos'
       });
     }
 
-    // Buscar usuario por email
+    // Buscar usuario por username
     const result = await pool.query(
-      'SELECT * FROM usuarios WHERE email = $1 AND estado = $2',
-      [email, 'activo']
+      'SELECT * FROM usuarios WHERE username = $1 AND estado = $2',
+      [username, 'activo']
     );
 
     if (result.rows.length === 0) {
@@ -44,7 +44,7 @@ const login = async (req, res) => {
     const token = jwt.sign(
       {
         id: usuario.id,
-        email: usuario.email,
+        username: usuario.username,
         role: usuario.role,
         nombre: usuario.nombre
       },
@@ -58,7 +58,7 @@ const login = async (req, res) => {
       token,
       usuario: {
         id: usuario.id,
-        email: usuario.email,
+        username: usuario.username,
         nombre: usuario.nombre,
         role: usuario.role
       }
@@ -75,10 +75,10 @@ const login = async (req, res) => {
 // Register
 const register = async (req, res) => {
   try {
-    const { email, password, nombre, role } = req.body;
+    const { username, password, nombre, role } = req.body;
 
     // Validar datos
-    if (!email || !password || !nombre || !role) {
+    if (!username || !password || !nombre || !role) {
       return res.status(400).json({
         success: false,
         message: 'Todos los campos son requeridos'
@@ -94,16 +94,16 @@ const register = async (req, res) => {
       });
     }
 
-    // Verificar si el email ya existe
-    const emailExistente = await pool.query(
-      'SELECT id FROM usuarios WHERE email = $1',
-      [email]
+    // Verificar si el username ya existe
+    const usernameExistente = await pool.query(
+      'SELECT id FROM usuarios WHERE username = $1',
+      [username]
     );
 
-    if (emailExistente.rows.length > 0) {
+    if (usernameExistente.rows.length > 0) {
       return res.status(409).json({
         success: false,
-        message: 'El email ya está registrado'
+        message: 'El usuario ya está registrado'
       });
     }
 
@@ -113,10 +113,10 @@ const register = async (req, res) => {
 
     // Crear usuario
     const resultado = await pool.query(
-      `INSERT INTO usuarios (email, password, nombre, role, estado) 
+      `INSERT INTO usuarios (username, password, nombre, role, estado) 
        VALUES ($1, $2, $3, $4, $5) 
-       RETURNING id, email, nombre, role`,
-      [email, passwordEncriptada, nombre, role, 'activo']
+       RETURNING id, username, nombre, role`,
+      [username, passwordEncriptada, nombre, role, 'activo']
     );
 
     const usuarioCreado = resultado.rows[0];
@@ -125,7 +125,7 @@ const register = async (req, res) => {
     const token = jwt.sign(
       {
         id: usuarioCreado.id,
-        email: usuarioCreado.email,
+        username: usuarioCreado.username,
         role: usuarioCreado.role,
         nombre: usuarioCreado.nombre
       },
@@ -139,7 +139,7 @@ const register = async (req, res) => {
       token,
       usuario: {
         id: usuarioCreado.id,
-        email: usuarioCreado.email,
+        username: usuarioCreado.username,
         nombre: usuarioCreado.nombre,
         role: usuarioCreado.role
       }
@@ -167,7 +167,7 @@ const getMe = async (req, res) => {
     const usuarioId = req.user.id;
 
     const result = await pool.query(
-      'SELECT id, email, nombre, role, estado FROM usuarios WHERE id = $1',
+      'SELECT id, username, nombre, role, estado FROM usuarios WHERE id = $1',
       [usuarioId]
     );
 
