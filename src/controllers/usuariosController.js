@@ -168,8 +168,8 @@ exports.createDelegado = async (req, res) => {
   try {
     const { nombre, username, sede_id, telefono, nombre_club } = req.body;
 
-    if (!nombre || !username || !sede_id || !nombre_club) {
-      return res.status(400).json({ error: 'Nombre, usuario y sede son requeridos' });
+    if (!nombre || !username || !nombre_club) {
+      return res.status(400).json({ error: 'Nombre, usuario y nombre del club son requeridos' });
     }
 
     await client.query('BEGIN');
