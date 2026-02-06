@@ -82,18 +82,32 @@ exports.updateNivel = async (req, res) => {
 
 // Eliminar nivel
 exports.deleteNivel = async (req, res) => {
+    const client = await pool.connect();
     try {
         const { id } = req.params;
-        // Verificar si tiene equipos asociados
-        const check = await pool.query('SELECT 1 FROM equipos WHERE nivel_id = $1 LIMIT 1');
-        if (check.rows.length > 0) {
-            return res.status(400).json({ message: 'No se puede eliminar, el nivel tiene equipos inscritos.' });
-        }
-        await pool.query('DELETE FROM niveles WHERE id = $1', [id]);
-        res.json({ message: 'Nivel eliminado' });
+        
+        await client.query('BEGIN');
+
+        // 1. Eliminar partidos del nivel (y sus sets por cascade)
+        await client.query('DELETE FROM partidos WHERE nivel_id = $1', [id]);
+
+        // 2. Eliminar estadísticas de equipos en este nivel
+        await client.query('DELETE FROM estadisticas_equipos WHERE nivel_id = $1', [id]);
+
+        // 3. Desvincular equipos (poner nivel_id en NULL)
+        await client.query('UPDATE equipos SET nivel_id = NULL WHERE nivel_id = $1', [id]);
+
+        // 4. Eliminar el nivel
+        await client.query('DELETE FROM niveles WHERE id = $1', [id]);
+
+        await client.query('COMMIT');
+        res.json({ message: 'Nivel eliminado y datos asociados limpiados correctamente' });
     } catch (error) {
+        await client.query('ROLLBACK');
         console.error('Error deleting nivel:', error);
-        res.status(500).json({ message: 'Error al eliminar el nivel' });
+        res.status(500).json({ message: 'Error al eliminar el nivel: ' + error.message });
+    } finally {
+        client.release();
     }
 };
 

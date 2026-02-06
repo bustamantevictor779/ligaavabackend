@@ -488,7 +488,6 @@ exports.getPartidosDelegado = async (req, res) => {
                 OR
                 eb.sede_id IN (SELECT sede_id FROM delegados_sedes WHERE usuario_id = $1))
                 AND t.estado = 'activo'
-                AND p.estado != 'pendiente'
             ORDER BY p.fecha ASC, p.horario ASC
         `, [userId]);
         
