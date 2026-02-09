@@ -156,12 +156,13 @@ const recalculateLevelStats = async (client, nivel_id) => {
           if (m.es_walkover) {
               teamStats[winnerId].pts += 4; // Walkover (Ausencia)
           } else {
-              // Regla estándar: 3-0/3-1 = 3pts, 3-2 = 2pts (ganador) / 1pt (perdedor)
+              // Regla cliente: 3-0/3-1 = 4pts/1pt, 3-2 = 3pts/2pts
               if (Math.abs(setsA - setsB) >= 2) {
-                  teamStats[winnerId].pts += 3;
-              } else {
-                  teamStats[winnerId].pts += 2;
+                  teamStats[winnerId].pts += 4;
                   teamStats[loserId].pts += 1;
+              } else {
+                  teamStats[winnerId].pts += 3;
+                  teamStats[loserId].pts += 2;
               }
           }
       }
