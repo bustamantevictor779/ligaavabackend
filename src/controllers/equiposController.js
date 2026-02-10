@@ -10,17 +10,12 @@ exports.getAllEquipos = async (req, res) => {
         e.nombre, e.logo_url, e.sede_id,
         s.nombre as sede_nombre, s.ubicacion as sede_ubicacion,
         n.nombre as nivel_nombre, n.categoria as nivel_categoria,
+        e.delegado_id, -- Nueva columna
         (
-          SELECT STRING_AGG(u.nombre, ', ')
-          FROM delegados_sedes ds
-          JOIN usuarios u ON ds.usuario_id = u.id
-          WHERE ds.sede_id = e.sede_id
-        ) as delegados_nombres,
+          SELECT u.nombre FROM usuarios u WHERE u.id = e.delegado_id
+        ) as delegado_nombre,
         (
-          SELECT STRING_AGG(u.telefono, ', ')
-          FROM delegados_sedes ds
-          JOIN usuarios u ON ds.usuario_id = u.id
-          WHERE ds.sede_id = e.sede_id
+          SELECT u.telefono FROM usuarios u WHERE u.id = e.delegado_id
         ) as delegados_telefonos,
         (SELECT COUNT(*)::int FROM jugadores j WHERE j.equipo_id = e.id) as cantidad_jugadores
       FROM equipos e
@@ -45,17 +40,12 @@ exports.getEquipoById = async (req, res) => {
         e.nombre, e.logo_url, e.sede_id,
         s.nombre as sede_nombre, s.ubicacion as sede_ubicacion,
         n.nombre as nivel_nombre, n.categoria as nivel_categoria,
+        e.delegado_id, -- Nueva columna
         (
-          SELECT STRING_AGG(u.nombre, ', ')
-          FROM delegados_sedes ds
-          JOIN usuarios u ON ds.usuario_id = u.id
-          WHERE ds.sede_id = e.sede_id
-        ) as delegados_nombres,
+          SELECT u.nombre FROM usuarios u WHERE u.id = e.delegado_id
+        ) as delegado_nombre,
         (
-          SELECT STRING_AGG(u.telefono, ', ')
-          FROM delegados_sedes ds
-          JOIN usuarios u ON ds.usuario_id = u.id
-          WHERE ds.sede_id = e.sede_id
+          SELECT u.telefono FROM usuarios u WHERE u.id = e.delegado_id
         ) as delegados_telefonos,
         (SELECT COUNT(*)::int FROM jugadores j WHERE j.equipo_id = e.id) as cantidad_jugadores
       FROM equipos e
@@ -79,17 +69,17 @@ exports.getEquipoById = async (req, res) => {
 // Crear un nuevo equipo
 exports.createEquipo = async (req, res) => {
   try {
-    const { nombre, sede_id, logo_url, nivel_id, categoria, nombre_extra, estado = 'activo' } = req.body;
+    const { nombre, sede_id, logo_url, nivel_id, categoria, nombre_extra, delegado_id, estado = 'activo' } = req.body;
 
     if (!nombre || !categoria) {
       return res.status(400).json({ error: 'Nombre y categoría son requeridos' });
     }
 
     const result = await pool.query(
-      `INSERT INTO equipos (nombre, sede_id, logo_url, nivel_id, categoria, nombre_extra, estado)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO equipos (nombre, sede_id, logo_url, nivel_id, categoria, nombre_extra, delegado_id, estado)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [nombre, sede_id || null, logo_url || null, nivel_id || null, categoria, nombre_extra || null, estado]
+      [nombre, sede_id || null, logo_url || null, nivel_id || null, categoria, nombre_extra || null, delegado_id || null, estado]
     );
 
     res.status(201).json(result.rows[0]);
@@ -102,21 +92,44 @@ exports.createEquipo = async (req, res) => {
 // Actualizar equipo
 exports.updateEquipo = async (req, res) => {
   try {
-    const { id } = req.params;
-    const { nombre, sede_id, logo_url, nivel_id, categoria, nombre_extra, estado } = req.body;
+    const { id } = req.params; // equipo_id
+    const { nombre, sede_id, logo_url, nivel_id, categoria, nombre_extra, delegado_id, estado } = req.body;
 
-    const result = await pool.query(
-      `UPDATE equipos 
-       SET nombre = COALESCE($1, nombre),
-           sede_id = COALESCE($2, sede_id),
-           logo_url = COALESCE($3, logo_url),
-           nivel_id = $4, -- Permitimos null explícito
-           categoria = COALESCE($5, categoria),
-           nombre_extra = $6, -- Permitimos null explícito
-           estado = COALESCE($7, estado)
-       WHERE id = $8
-       RETURNING *`,
-      [nombre, sede_id, logo_url, nivel_id, categoria, nombre_extra, estado, id]
+    // Construcción dinámica de la query para permitir NULLs y actualizaciones parciales correctas
+    const fields = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (nombre !== undefined) { fields.push(`nombre = $${paramCount++}`); values.push(nombre); }
+    if (sede_id !== undefined) { fields.push(`sede_id = $${paramCount++}`); values.push(sede_id); }
+    if (logo_url !== undefined) { fields.push(`logo_url = $${paramCount++}`); values.push(logo_url); }
+    if (nivel_id !== undefined) { fields.push(`nivel_id = $${paramCount++}`); values.push(nivel_id); }
+    if (categoria !== undefined) { fields.push(`categoria = $${paramCount++}`); values.push(categoria); }
+    if (delegado_id !== undefined) { fields.push(`delegado_id = $${paramCount++}`); values.push(delegado_id); } // Nueva columna
+    if (nombre_extra !== undefined) { fields.push(`nombre_extra = $${paramCount++}`); values.push(nombre_extra); }
+    if (estado !== undefined) { fields.push(`estado = $${paramCount++}`); values.push(estado); }
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: 'No se enviaron campos para actualizar' });
+    }
+
+    values.push(id);
+    
+    // Consulta base para devolver los datos completos (joins) después del update
+    const returningQuery = `
+      WITH updated AS (
+        UPDATE equipos SET ${fields.join(', ')} WHERE id = $${paramCount} RETURNING *
+      )
+      SELECT u.*, 
+        s.nombre as sede_nombre, 
+        n.nombre as nivel_nombre, n.categoria as nivel_categoria,
+        (SELECT usr.nombre FROM usuarios usr WHERE usr.id = u.delegado_id) as delegado_nombre,
+        (SELECT usr.telefono FROM usuarios usr WHERE usr.id = u.delegado_id) as delegado_telefono
+      FROM updated u
+      LEFT JOIN sedes s ON u.sede_id = s.id
+      LEFT JOIN niveles n ON u.nivel_id = n.id`;
+
+    const result = await pool.query(returningQuery, values
     );
 
     if (result.rows.length === 0) {

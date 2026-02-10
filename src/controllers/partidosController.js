@@ -195,23 +195,23 @@ const checkAndCreateFinal = async (client, nivel_id) => {
     console.log(`📊 [DEBUG SYSTEM] Total partidos en nivel: ${allMatches.length}`);
     allMatches.forEach(m => console.log(`   - ID: ${m.id} | Instancia: "${m.instancia}" | Estado: ${m.estado}`));
 
-    // 2. Filtrar semifinales usando JS (más seguro que SQL para strings sucios)
+    // 2. Filtrar semifinales (Lógica mejorada: busca "semifinal" en cualquier parte)
     const semis = allMatches.filter(p => {
         if (!p.instancia) return false;
         const inst = p.instancia.trim().toLowerCase();
-        return inst === 'semifinal 1' || inst === 'semifinal 2';
+        return inst.includes('semifinal') || inst.includes('semi final');
     });
 
     console.log(`🎯 [DEBUG SYSTEM] Semifinales identificadas: ${semis.length}`);
 
     if (semis.length !== 2) {
-        console.log('❌ [DEBUG SYSTEM] No se encontraron exactamente 2 semifinales. Cancelando.');
+        console.log('❌ [DEBUG SYSTEM] No se encontraron exactamente 2 semifinales. Se requiere que existan 2 partidos con "Semifinal" en la instancia.');
         return;
     }
 
     const allFinished = semis.every(p => p.estado === 'finalizado');
     if (!allFinished) {
-        console.log('❌ [DEBUG SYSTEM] Al menos una semifinal no está finalizada. Cancelando.');
+        console.log('⏳ [DEBUG SYSTEM] Al menos una semifinal no está finalizada. Esperando...');
         return;
     }
 

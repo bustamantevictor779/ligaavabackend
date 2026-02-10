@@ -254,17 +254,41 @@ exports.updateDelegado = async (req, res) => {
 
     await client.query('BEGIN');
 
-    // Actualizar datos básicos
+    // Actualizar datos básicos (Dinámico)
+    const userFields = ['updated_at = NOW()'];
+    const userValues = [];
+    let pCount = 1;
+
+    if (nombre !== undefined) { userFields.push(`nombre = $${pCount++}`); userValues.push(nombre); }
+    if (username !== undefined) { userFields.push(`username = $${pCount++}`); userValues.push(username); }
+    if (telefono !== undefined) { userFields.push(`telefono = $${pCount++}`); userValues.push(telefono); }
+    
+    userValues.push(id);
     await client.query(
-      `UPDATE usuarios SET nombre = COALESCE($1, nombre), username = COALESCE($2, username), telefono = COALESCE($3, telefono), updated_at = NOW() WHERE id = $4`,
-      [nombre, username, telefono, id]
+      `UPDATE usuarios SET ${userFields.join(', ')} WHERE id = $${pCount}`, userValues
     );
 
     // Actualizar sede y club si se proporciona
-    if (sede_id || nombre_club) {
+    // Se cambió la condición para que si sede_id o nombre_club son explícitamente null, se actualice.
+    // Antes, `if (sede_id || nombre_club)` no permitía asignar null si el valor anterior no era null.
+    if (sede_id !== undefined || nombre_club !== undefined) {
       const checkSede = await client.query('SELECT id FROM delegados_sedes WHERE usuario_id = $1', [id]);
       if (checkSede.rows.length > 0) {
-        await client.query('UPDATE delegados_sedes SET sede_id = COALESCE($1, sede_id), nombre_club = COALESCE($2, nombre_club) WHERE usuario_id = $3', [sede_id, nombre_club, id]);
+        const dsFields = [];
+        const dsValues = [];
+        let dsPCount = 1;
+
+        // Solo agregar al update si el valor fue enviado (undefined significa no cambiar)
+        if (sede_id !== undefined) { dsFields.push(`sede_id = $${dsPCount++}`); dsValues.push(sede_id); }
+        if (nombre_club !== undefined) { dsFields.push(`nombre_club = $${dsPCount++}`); dsValues.push(nombre_club); }
+
+        if (dsFields.length > 0) {
+          dsValues.push(id); // El último valor es el ID del usuario
+          await client.query(
+            `UPDATE delegados_sedes SET ${dsFields.join(', ')} WHERE usuario_id = $${dsPCount}`,
+            dsValues
+          );
+        }
       } else {
         await client.query('INSERT INTO delegados_sedes (usuario_id, sede_id, nombre_club) VALUES ($1, $2, $3)', [id, sede_id, nombre_club]);
       }
