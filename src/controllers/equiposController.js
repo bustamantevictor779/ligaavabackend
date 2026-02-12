@@ -225,9 +225,11 @@ exports.getEquiposDelegado = async (req, res) => {
         n.nombre as nivel_nombre,
         (SELECT COUNT(*)::int FROM jugadores j WHERE j.equipo_id = e.id) as cantidad_jugadores
       FROM equipos e
-      JOIN delegados_sedes ds ON e.sede_id = ds.sede_id
       LEFT JOIN niveles n ON e.nivel_id = n.id
-      WHERE ds.usuario_id = $1
+      WHERE 
+        e.delegado_id = $1
+        OR
+        e.sede_id IN (SELECT sede_id FROM delegados_sedes WHERE usuario_id = $1)
       ORDER BY e.nombre ASC`,
       [userId]
     );

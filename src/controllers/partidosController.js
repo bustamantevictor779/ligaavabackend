@@ -485,9 +485,13 @@ exports.getPartidosDelegado = async (req, res) => {
             JOIN equipos eb ON p.equipo_b_id = eb.id
             LEFT JOIN sedes s ON p.sede_id = s.id
             WHERE 
-                (ea.sede_id IN (SELECT sede_id FROM delegados_sedes WHERE usuario_id = $1)
+                (
+                ea.delegado_id = $1 OR eb.delegado_id = $1
                 OR
-                eb.sede_id IN (SELECT sede_id FROM delegados_sedes WHERE usuario_id = $1))
+                ea.sede_id IN (SELECT sede_id FROM delegados_sedes WHERE usuario_id = $1)
+                OR
+                eb.sede_id IN (SELECT sede_id FROM delegados_sedes WHERE usuario_id = $1)
+                )
                 AND t.estado = 'activo'
             ORDER BY p.fecha ASC, p.horario ASC
         `, [userId]);
