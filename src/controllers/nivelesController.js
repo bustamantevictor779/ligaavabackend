@@ -88,16 +88,22 @@ exports.deleteNivel = async (req, res) => {
         
         await client.query('BEGIN');
 
-        // 1. Eliminar partidos del nivel (y sus sets por cascade)
+        // 1. Eliminar sets de los partidos del nivel (para evitar error de FK)
+        await client.query(`
+            DELETE FROM sets_partido 
+            WHERE partido_id IN (SELECT id FROM partidos WHERE nivel_id = $1)
+        `, [id]);
+
+        // 2. Eliminar partidos del nivel
         await client.query('DELETE FROM partidos WHERE nivel_id = $1', [id]);
 
-        // 2. Eliminar estadísticas de equipos en este nivel
+        // 3. Eliminar estadísticas de equipos en este nivel
         await client.query('DELETE FROM estadisticas_equipos WHERE nivel_id = $1', [id]);
 
-        // 3. Desvincular equipos (poner nivel_id en NULL)
+        // 4. Desvincular equipos (poner nivel_id en NULL)
         await client.query('UPDATE equipos SET nivel_id = NULL WHERE nivel_id = $1', [id]);
 
-        // 4. Eliminar el nivel
+        // 5. Eliminar el nivel
         await client.query('DELETE FROM niveles WHERE id = $1', [id]);
 
         await client.query('COMMIT');

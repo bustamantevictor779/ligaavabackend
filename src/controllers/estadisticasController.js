@@ -114,12 +114,6 @@ exports.getGanadoresDeGrupos = async (req, res) => {
 
     if (numGrupos === 0) return res.json([]);
 
-    // Regla de clasificación para llegar a 4 equipos (Semifinales):
-    // - 4 grupos -> Clasifica 1 por grupo
-    // - 2 grupos -> Clasifican 2 por grupo
-    // - 1 grupo  -> Clasifican 4 por grupo
-    let clasificadosPorGrupo = numGrupos >= 4 ? 1 : (numGrupos === 1 ? 4 : 2);
-
     // 2. Obtener estadísticas de todos los equipos involucrados
     const statsResult = await pool.query(`
         SELECT
@@ -147,7 +141,7 @@ exports.getGanadoresDeGrupos = async (req, res) => {
     `, [activeLevelIds]);
 
     // 4. Agrupar por nivel, ordenar y seleccionar ganadores
-    const winners = [];
+    const allRankedTeams = [];
     
     // Agrupar equipos por nivel
     const teamsByLevel = {};
@@ -168,21 +162,20 @@ exports.getGanadoresDeGrupos = async (req, res) => {
       if (teamsByLevel[levelId]) {
         // Ordenar con la misma lógica que la tabla de posiciones
         const sorted = sortTeams(teamsByLevel[levelId], matchesByLevel[levelId] || []);
-        
         // Asignar ranking y filtrar
         sorted.forEach((t, i) => t.rn = i + 1);
-        const topTeams = sorted.filter(t => t.rn <= clasificadosPorGrupo);
-        winners.push(...topTeams);
+        allRankedTeams.push(...sorted);
       }
     }
 
-    // Ordenar resultado final para consistencia visual
-    winners.sort((a, b) => {
-        if (a.nivel_id !== b.nivel_id) return a.nivel_id - b.nivel_id;
-        return a.rn - b.rn;
+    // Ordenar globalmente a todos los equipos clasificados
+    // Primero por el ranking dentro de su grupo, luego por puntos de tabla como desempate
+    allRankedTeams.sort((a, b) => {
+        if (a.rn !== b.rn) return a.rn - b.rn;
+        return b.puntos_tabla - a.puntos_tabla;
     });
 
-    res.json(winners);
+    res.json(allRankedTeams);
   } catch (error) {
     console.error('Error getting ganadores de grupos:', error);
     res.status(500).json({ message: 'Error al obtener los ganadores de los grupos' });

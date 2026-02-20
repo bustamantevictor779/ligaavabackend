@@ -23,6 +23,7 @@ app.use('/api/estadisticas', require('./routes/estadisticas'));
 app.use('/api/utils', require('./routes/utils'));
 app.use('/api/configuracion', require('./routes/configuracion'));
 app.use('/api/upload', require('./routes/upload'));
+app.use('/api/pagos', require('./routes/pagos'));
 
 
 

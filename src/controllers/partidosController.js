@@ -1,4 +1,5 @@
 const pool = require('../config/database');
+const bracketService = require('../services/bracketService');
 
 /**
  * Genera un fixture "todos contra todos" para un nivel específico.
@@ -26,6 +27,14 @@ exports.createFixture = async (req, res) => {
     // 2. Eliminar partidos pendientes anteriores de este nivel (limpieza)
     await client.query("DELETE FROM partidos WHERE nivel_id = $1 AND estado = 'pendiente'", [nivel_id]);
 
+    // 2.5. Obtener partidos que YA existen (programados, en curso, finalizados) para no duplicarlos
+    const existingMatchesRes = await client.query('SELECT equipo_a_id, equipo_b_id FROM partidos WHERE nivel_id = $1', [nivel_id]);
+    const existingPairs = new Set();
+    existingMatchesRes.rows.forEach(m => {
+        existingPairs.add(`${m.equipo_a_id}-${m.equipo_b_id}`);
+        existingPairs.add(`${m.equipo_b_id}-${m.equipo_a_id}`);
+    });
+
     // 3. Obtener el último número de partido para este nivel (para continuar la secuencia si hay jugados)
     const maxNumResult = await client.query('SELECT COALESCE(MAX(numero_partido), 0) as max_num FROM partidos WHERE nivel_id = $1', [nivel_id]);
     let currentNum = parseInt(maxNumResult.rows[0].max_num);
@@ -36,11 +45,17 @@ exports.createFixture = async (req, res) => {
 
     for (let i = 0; i < shuffledEquipos.length; i++) {
       for (let j = i + 1; j < shuffledEquipos.length; j++) {
+        const idA = shuffledEquipos[i];
+        const idB = shuffledEquipos[j];
+
+        // Verificar si ya existe el cruce (en cualquier orden)
+        if (existingPairs.has(`${idA}-${idB}`)) continue;
+
         // Asignar localía aleatoria
         if (Math.random() > 0.5) {
-            partidosParaInsertar.push([shuffledEquipos[i], shuffledEquipos[j]]);
+            partidosParaInsertar.push([idA, idB]);
         } else {
-            partidosParaInsertar.push([shuffledEquipos[j], shuffledEquipos[i]]);
+            partidosParaInsertar.push([idB, idA]);
         }
       }
     }
@@ -311,20 +326,25 @@ exports.getAllPartidos = async (req, res) => {
                 p.id, p.fecha, p.horario, p.estado, p.resultado_equipo_a, p.resultado_equipo_b,
                 p.sede_id, p.arbitro_id, p.numero_partido,
                 p.torneo_id, p.nivel_id, p.instancia,
+                p.equipo_a_id, p.equipo_b_id,
+                p.equipo_a_source_partido_id, p.equipo_b_source_partido_id,
+                p.equipo_a_placeholder_desc, p.equipo_b_placeholder_desc,
                 t.nombre as torneo_nombre,
                 n.nombre as nivel_nombre,
                 n.categoria as nivel_categoria,
                 n.tipo as nivel_tipo,
                 s.nombre as sede_nombre,
                 u.nombre as arbitro_nombre,
-                ea.nombre as equipo_a_nombre, ea.logo_url as equipo_a_logo,
-                eb.nombre as equipo_b_nombre, eb.logo_url as equipo_b_logo,
+                COALESCE(ea.nombre, p.equipo_a_placeholder_desc, 'A confirmar') as equipo_a_nombre,
+                ea.logo_url as equipo_a_logo,
+                COALESCE(eb.nombre, p.equipo_b_placeholder_desc, 'A confirmar') as equipo_b_nombre,
+                eb.logo_url as equipo_b_logo,
                 (SELECT COALESCE(json_agg(sp.* ORDER BY sp.numero_set), '[]') FROM sets_partido sp WHERE sp.partido_id = p.id) as sets
             FROM partidos p
             JOIN torneos t ON p.torneo_id = t.id
             JOIN niveles n ON p.nivel_id = n.id
-            JOIN equipos ea ON p.equipo_a_id = ea.id
-            JOIN equipos eb ON p.equipo_b_id = eb.id
+            LEFT JOIN equipos ea ON p.equipo_a_id = ea.id
+            LEFT JOIN equipos eb ON p.equipo_b_id = eb.id
             LEFT JOIN sedes s ON p.sede_id = s.id
             LEFT JOIN usuarios u ON p.arbitro_id = u.id
         `;
@@ -343,31 +363,133 @@ exports.getAllPartidos = async (req, res) => {
     }
 };
 
-// Actualizar partido
+// Actualizar partido (ahora acepta asignar equipos y placeholders)
 exports.updatePartido = async (req, res) => {
     try {
         const { id } = req.params;
-        const { fecha, horario, sede_id, arbitro_id, estado, instancia } = req.body;
-        const instanciaNormalized = instancia ? instancia.trim().toLowerCase() : instancia;
+        const {
+            fecha, horario, sede_id, arbitro_id, estado, instancia,
+            equipo_a_id, equipo_b_id,
+            equipo_a_source_partido_id, equipo_b_source_partido_id,
+            equipo_a_placeholder_desc, equipo_b_placeholder_desc,
+            reset // Nueva bandera para resetear el partido
+        } = req.body;
 
-        const result = await pool.query(
-            `UPDATE partidos SET
-                fecha = COALESCE($1, fecha),
-                horario = COALESCE($2, horario),
-                sede_id = COALESCE($3, sede_id),
-                arbitro_id = COALESCE($4, arbitro_id),
-                estado = COALESCE($5, estado),
-                instancia = COALESCE($6, instancia)
-            WHERE id = $7 RETURNING *`,
-            [fecha, horario, sede_id, arbitro_id, estado, instanciaNormalized, id]
-        );
+        // Lógica de RESET: Limpiar partido y volver a pendiente
+        if (reset) {
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+                
+                // Obtener estado actual para saber si hay que recalcular stats
+                const currentRes = await client.query('SELECT nivel_id, estado FROM partidos WHERE id = $1', [id]);
+                if (currentRes.rows.length === 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({ message: 'Partido no encontrado' });
+                }
+                const { nivel_id, estado: oldEstado } = currentRes.rows[0];
+
+                // 1. Borrar sets asociados
+                await client.query('DELETE FROM sets_partido WHERE partido_id = $1', [id]);
+
+                // 2. Limpiar datos del partido
+                const resetQuery = `
+                    UPDATE partidos 
+                    SET estado = 'pendiente', 
+                        fecha = NULL, 
+                        horario = NULL, 
+                        sede_id = NULL, 
+                        arbitro_id = NULL, 
+                        resultado_equipo_a = NULL, 
+                        resultado_equipo_b = NULL,
+                        es_walkover = FALSE
+                    WHERE id = $1
+                    RETURNING *
+                `;
+                const result = await client.query(resetQuery, [id]);
+                const updatedPartido = result.rows[0];
+
+                // 3. Recalcular estadísticas si estaba finalizado (para restar los puntos mal asignados)
+                if (oldEstado === 'finalizado') {
+                    await recalculateLevelStats(client, nivel_id);
+                }
+                
+                // 4. Recalcular números de partido (el orden puede cambiar al perder la fecha)
+                await recalculateMatchNumbers(client, nivel_id);
+
+                await client.query('COMMIT');
+                return res.json(updatedPartido);
+            } catch (err) {
+                await client.query('ROLLBACK');
+                throw err;
+            } finally {
+                client.release();
+            }
+        }
+
+        const fields = [];
+        const values = [];
+        let idx = 1;
+
+        const pushField = (column, value) => {
+            fields.push(`${column} = $${idx++}`);
+            values.push(value);
+        };
+
+        if (fecha !== undefined) pushField('fecha', fecha || null);
+        if (horario !== undefined) pushField('horario', horario || null);
+        if (sede_id !== undefined) pushField('sede_id', sede_id || null);
+        if (arbitro_id !== undefined) pushField('arbitro_id', arbitro_id || null);
+        if (estado !== undefined) pushField('estado', estado);
+        if (instancia !== undefined) pushField('instancia', instancia ? instancia.trim().toLowerCase() : null);
+
+        // Lógica robusta para equipos: Solo actualizar si hay un valor real o un cambio de estructura explícito.
+        // Si vienen nulos o vacíos (común en formularios de solo fecha), se ignoran para no borrar datos.
         
+        const hasContent = (val) => val !== undefined && val !== null && val !== '';
+        const isPresent = (val) => val !== undefined;
+
+        // --- EQUIPO A ---
+        if (isPresent(equipo_a_id) || isPresent(equipo_a_placeholder_desc) || isPresent(equipo_a_source_partido_id)) {
+            if (hasContent(equipo_a_id)) {
+                // Se envió un ID de equipo válido: Actualizar equipo y limpiar placeholders si se enviaron
+                pushField('equipo_a_id', equipo_a_id);
+                if (isPresent(equipo_a_placeholder_desc)) pushField('equipo_a_placeholder_desc', equipo_a_placeholder_desc || null);
+                if (isPresent(equipo_a_source_partido_id)) pushField('equipo_a_source_partido_id', equipo_a_source_partido_id || null);
+            } else if (hasContent(equipo_a_placeholder_desc) || hasContent(equipo_a_source_partido_id)) {
+                // Se envió un placeholder/source válido: Borrar equipo y poner placeholder
+                pushField('equipo_a_id', null);
+                if (isPresent(equipo_a_placeholder_desc)) pushField('equipo_a_placeholder_desc', equipo_a_placeholder_desc);
+                if (isPresent(equipo_a_source_partido_id)) pushField('equipo_a_source_partido_id', equipo_a_source_partido_id);
+            }
+            // Si todo es null/vacío, NO HACEMOS NADA (protegemos el dato existente)
+        }
+
+        // --- EQUIPO B ---
+        if (isPresent(equipo_b_id) || isPresent(equipo_b_placeholder_desc) || isPresent(equipo_b_source_partido_id)) {
+            if (hasContent(equipo_b_id)) {
+                pushField('equipo_b_id', equipo_b_id);
+                if (isPresent(equipo_b_placeholder_desc)) pushField('equipo_b_placeholder_desc', equipo_b_placeholder_desc || null);
+                if (isPresent(equipo_b_source_partido_id)) pushField('equipo_b_source_partido_id', equipo_b_source_partido_id || null);
+            } else if (hasContent(equipo_b_placeholder_desc) || hasContent(equipo_b_source_partido_id)) {
+                pushField('equipo_b_id', null);
+                if (isPresent(equipo_b_placeholder_desc)) pushField('equipo_b_placeholder_desc', equipo_b_placeholder_desc);
+                if (isPresent(equipo_b_source_partido_id)) pushField('equipo_b_source_partido_id', equipo_b_source_partido_id);
+            }
+        }
+
+        if (fields.length === 0) return res.status(400).json({ message: 'No hay campos para actualizar' });
+
+        const query = `UPDATE partidos SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`;
+        values.push(id);
+
+        const result = await pool.query(query, values);
         if (result.rows.length === 0) return res.status(404).json({ message: 'Partido no encontrado' });
-        
+
         const updatedPartido = result.rows[0];
         // Recalcular números del nivel por si cambió el orden cronológico
         await recalculateMatchNumbers(pool, updatedPartido.nivel_id);
-        
+
         res.json(updatedPartido);
     } catch (error) {
         console.error('Error updating partido:', error);
@@ -378,28 +500,45 @@ exports.updatePartido = async (req, res) => {
 // Crear un único partido (para playoffs)
 exports.createPartido = async (req, res) => {
   try {
-    const { torneo_id, nivel_id, equipo_a_id, equipo_b_id, instancia, fecha, horario, sede_id, arbitro_id } = req.body;
+    const { 
+        torneo_id, nivel_id, 
+        equipo_a_id, equipo_b_id, 
+        equipo_a_source_partido_id, equipo_b_source_partido_id,
+        equipo_a_placeholder_desc, equipo_b_placeholder_desc,
+        instancia, fecha, horario, sede_id, arbitro_id 
+    } = req.body;
 
-    if (!torneo_id || !nivel_id || !equipo_a_id || !equipo_b_id) {
-      return res.status(400).json({ message: 'Faltan datos para crear el partido.' });
-    }
+    if (!torneo_id || !nivel_id) return res.status(400).json({ message: 'Faltan datos del torneo/nivel.' });
 
     const instanciaNormalized = instancia ? instancia.trim().toLowerCase() : null;
 
-    // Si se proveen datos de programación, el estado es 'programado', si no 'pendiente'
-    const estado = (fecha && horario && sede_id && arbitro_id) ? 'programado' : 'pendiente';
+    // Un partido con placeholders siempre está pendiente hasta que se definan los equipos
+    // Si tiene equipos definidos y fecha/hora/sede/arbitro, es programado.
+    const hasTeams = (equipo_a_id || equipo_a_source_partido_id) && (equipo_b_id || equipo_b_source_partido_id);
+    const isScheduled = fecha && horario && sede_id && arbitro_id;
+    
+    const estado = (hasTeams && isScheduled) ? 'programado' : 'pendiente';
 
     // Calcular siguiente numero
     const maxNumResult = await pool.query('SELECT COALESCE(MAX(numero_partido), 0) as max_num FROM partidos WHERE nivel_id = $1', [nivel_id]);
     const nextNum = parseInt(maxNumResult.rows[0].max_num) + 1;
 
     const result = await pool.query(
-      `INSERT INTO partidos (torneo_id, nivel_id, equipo_a_id, equipo_b_id, estado, instancia, numero_partido, fecha, horario, sede_id, arbitro_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      `INSERT INTO partidos (
+          torneo_id, nivel_id, 
+          equipo_a_id, equipo_b_id, 
+          equipo_a_source_partido_id, equipo_b_source_partido_id, 
+          equipo_a_placeholder_desc, equipo_b_placeholder_desc, 
+          estado, instancia, numero_partido, fecha, horario, sede_id, arbitro_id
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING *`,
       [
-        torneo_id, nivel_id, equipo_a_id, equipo_b_id, estado, 
-        instanciaNormalized, nextNum, fecha || null, horario || null, 
+        torneo_id, nivel_id, 
+        equipo_a_id || null, equipo_b_id || null, 
+        equipo_a_source_partido_id || null, equipo_b_source_partido_id || null, 
+        equipo_a_placeholder_desc || null, equipo_b_placeholder_desc || null, 
+        estado, instanciaNormalized, nextNum, fecha || null, horario || null, 
         sede_id || null, arbitro_id || null
       ]
     );
@@ -426,14 +565,14 @@ exports.getMisPartidos = async (req, res) => {
                 p.instancia, t.nombre as torneo_nombre,
                 n.nombre as nivel_nombre,
                 s.nombre as sede_nombre,
-                ea.nombre as equipo_a_nombre,
-                eb.nombre as equipo_b_nombre,
+                COALESCE(ea.nombre, p.equipo_a_placeholder_desc, 'A confirmar') as equipo_a_nombre,
+                COALESCE(eb.nombre, p.equipo_b_placeholder_desc, 'A confirmar') as equipo_b_nombre,
                 (SELECT COALESCE(json_agg(sp.* ORDER BY sp.numero_set), '[]') FROM sets_partido sp WHERE sp.partido_id = p.id) as sets
             FROM partidos p
             JOIN torneos t ON p.torneo_id = t.id
             JOIN niveles n ON p.nivel_id = n.id
-            JOIN equipos ea ON p.equipo_a_id = ea.id
-            JOIN equipos eb ON p.equipo_b_id = eb.id
+            LEFT JOIN equipos ea ON p.equipo_a_id = ea.id
+            LEFT JOIN equipos eb ON p.equipo_b_id = eb.id
             LEFT JOIN sedes s ON p.sede_id = s.id
             WHERE p.arbitro_id = $1 AND t.estado = 'activo'
             ORDER BY p.fecha ASC, p.horario ASC
@@ -677,6 +816,13 @@ exports.adminUpdateResult = async (req, res) => {
         console.log('🔄 [DEBUG SYSTEM] Recalculando estadísticas...');
         await recalculateLevelStats(client, nivel_id);
 
+        // Propagar ganador a placeholders (si existen) para las rondas siguientes
+        try {
+          await bracketService.updateNextRoundMatches(client, id);
+        } catch (err) {
+          console.error('Error al propagar ganador a siguientes rondas (adminUpdateResult):', err);
+        }
+
         // Verificar si se debe crear la final (si es playoff)
         console.log('🏁 [DEBUG SYSTEM] Llamando a checkAndCreateFinal...');
         await checkAndCreateFinal(client, nivel_id);
@@ -693,85 +839,6 @@ exports.adminUpdateResult = async (req, res) => {
         client.release();
     }
 };
-
-// Registrar o actualizar un set (Usado por Árbitros)
-exports.registrarSet = async (req, res) => {
-    const client = await pool.connect();
-    console.log(`\n📥 [ARBITRO] Registrando set para partido ID: ${req.body.partido_id}`);
-    try {
-        const { partido_id, numero_set, puntos_equipo_a, puntos_equipo_b } = req.body;
-
-        if (!partido_id || !numero_set) {
-            return res.status(400).json({ message: 'Faltan datos del set.' });
-        }
-
-        await client.query('BEGIN');
-
-        // 1. Insertar o Actualizar el set
-        // Primero borramos si existe para ese numero (upsert simple)
-        await client.query('DELETE FROM sets_partido WHERE partido_id = $1 AND numero_set = $2', [partido_id, numero_set]);
-        
-        await client.query(
-            'INSERT INTO sets_partido (partido_id, numero_set, puntos_equipo_a, puntos_equipo_b) VALUES ($1, $2, $3, $4)',
-            [partido_id, numero_set, puntos_equipo_a, puntos_equipo_b]
-        );
-
-        // 2. Verificar estado del partido (¿Alguien ganó ya?)
-        const setsRes = await client.query('SELECT * FROM sets_partido WHERE partido_id = $1 ORDER BY numero_set', [partido_id]);
-        const sets = setsRes.rows;
-
-        let setsA = 0;
-        let setsB = 0;
-        sets.forEach(s => {
-            if (s.puntos_equipo_a > s.puntos_equipo_b) setsA++;
-            else if (s.puntos_equipo_b > s.puntos_equipo_a) setsB++;
-        });
-
-        // Obtener info del partido
-        const partidoRes = await client.query('SELECT nivel_id, estado FROM partidos WHERE id = $1', [partido_id]);
-        const { nivel_id, estado } = partidoRes.rows[0];
-
-        let nuevoEstado = 'en_curso';
-        // Condición de victoria: Primero en llegar a 3 sets (Mejor de 5)
-        // OJO: Si tu torneo es a 3 sets (mejor de 3), cambia el 3 por 2. Asumo estándar de 5.
-        if (setsA === 3 || setsB === 3) {
-            nuevoEstado = 'finalizado';
-            console.log(`🏁 [ARBITRO] Partido ${partido_id} FINALIZADO. Resultado: ${setsA}-${setsB}`);
-        }
-
-        // 3. Actualizar estado y resultado global del partido
-        await client.query(
-            'UPDATE partidos SET resultado_equipo_a = $1, resultado_equipo_b = $2, estado = $3 WHERE id = $4',
-            [setsA, setsB, nuevoEstado, partido_id]
-        );
-
-        // 4. Si el partido finalizó, disparar toda la lógica de torneos
-        if (nuevoEstado === 'finalizado') {
-            console.log('🔄 [ARBITRO] Recalculando estadísticas y verificando fases...');
-            await recalculateLevelStats(client, nivel_id);
-            await checkAndCreateFinal(client, nivel_id);
-            await checkAndSetChampion(client, nivel_id);
-        }
-
-        await client.query('COMMIT');
-        
-        res.json({ 
-            message: 'Set registrado correctamente', 
-            partido: { id: partido_id, estado: nuevoEstado, marcador: { equipoA: setsA, equipoB: setsB } } 
-        });
-
-    } catch (error) {
-        await client.query('ROLLBACK');
-        console.error('Error registrando set:', error);
-        res.status(500).json({ message: 'Error al registrar el set: ' + error.message });
-    } finally {
-        client.release();
-    }
-};
-
-const fs = require('fs');
-const path = require('path');
-const logFile = path.join(__dirname, '..', 'log_arbitro.txt');
 
 // Helper para loggear a consola y archivo
 const writeLog = (message) => {
@@ -834,6 +901,14 @@ exports.registrarSet = async (req, res) => {
         if (nuevoEstado === 'finalizado') {
             writeLog('🔄 [ARBITRO] Recalculando estadísticas y verificando fases...');
             await recalculateLevelStats(client, nivel_id);
+
+            // Propagar ganador a placeholders (si existen) para las rondas siguientes
+            try {
+              await bracketService.updateNextRoundMatches(client, partido_id);
+            } catch (err) {
+              console.error('Error al propagar ganador a siguientes rondas (árbitro):', err);
+            }
+
             await checkAndCreateFinal(client, nivel_id);
             await checkAndSetChampion(client, nivel_id);
         } else {

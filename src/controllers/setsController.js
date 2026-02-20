@@ -1,4 +1,5 @@
 const pool = require('../config/database');
+const { updateNextRoundMatches } = require('../services/bracketService');
 
 // Función auxiliar para recalcular estadísticas de UN NIVEL completo (Copia de partidosController para consistencia)
 const recalculateLevelStats = async (client, nivel_id) => {
@@ -157,6 +158,8 @@ exports.createSet = async (req, res) => {
         await client.query("UPDATE partidos SET estado = 'finalizado' WHERE id = $1", [partido_id]);
         // Recálculo completo para asegurar consistencia
         await recalculateLevelStats(client, nivel_id);
+        // Actualizar llaves futuras
+        await updateNextRoundMatches(client, partido_id);
     }
 
     await client.query('COMMIT');
