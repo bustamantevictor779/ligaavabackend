@@ -16,7 +16,7 @@ exports.getAllEquipos = async (req, res) => {
         ) as delegado_nombre,
         (
           SELECT u.telefono FROM usuarios u WHERE u.id = e.delegado_id
-        ) as delegados_telefonos,
+        ) as delegado_telefono,
         (SELECT COUNT(*)::int FROM jugadores j WHERE j.equipo_id = e.id) as cantidad_jugadores
       FROM equipos e
       LEFT JOIN sedes s ON e.sede_id = s.id
@@ -46,7 +46,7 @@ exports.getEquipoById = async (req, res) => {
         ) as delegado_nombre,
         (
           SELECT u.telefono FROM usuarios u WHERE u.id = e.delegado_id
-        ) as delegados_telefonos,
+        ) as delegado_telefono,
         (SELECT COUNT(*)::int FROM jugadores j WHERE j.equipo_id = e.id) as cantidad_jugadores
       FROM equipos e
       LEFT JOIN sedes s ON e.sede_id = s.id
@@ -228,8 +228,6 @@ exports.getEquiposDelegado = async (req, res) => {
       LEFT JOIN niveles n ON e.nivel_id = n.id
       WHERE 
         e.delegado_id = $1
-        OR
-        e.sede_id IN (SELECT sede_id FROM delegados_sedes WHERE usuario_id = $1)
       ORDER BY e.nombre ASC`,
       [userId]
     );

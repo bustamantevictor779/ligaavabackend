@@ -626,15 +626,7 @@ exports.getPartidosDelegado = async (req, res) => {
             WHERE 
                 (
                 ea.delegado_id = $1 OR eb.delegado_id = $1
-                OR
-                ea.sede_id IN (SELECT sede_id FROM delegados_sedes WHERE usuario_id = $1)
-                OR
-                eb.sede_id IN (SELECT sede_id FROM delegados_sedes WHERE usuario_id = $1)
-                )
-                AND t.estado = 'activo'
-            ORDER BY p.fecha ASC, p.horario ASC
-        `, [userId]);
-        
+                
         res.json(result.rows);
     } catch (error) {
         console.error('Error getting partidos delegado:', error);
