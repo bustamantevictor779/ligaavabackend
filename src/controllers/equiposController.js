@@ -4,6 +4,15 @@ const pool = require('../config/database');
 // Obtener todos los equipos (con info de club y nivel)
 exports.getAllEquipos = async (req, res) => {
   try {
+    let whereClause = '';
+    const params = [];
+
+    // Si el usuario es delegado, forzamos el filtro por su ID
+    if (req.user && req.user.role === 'delegado') {
+      whereClause = 'WHERE e.delegado_id = $1';
+      params.push(req.user.id);
+    }
+
     const result = await pool.query(
       `SELECT 
         e.id, e.nivel_id, e.categoria, e.nombre_extra, e.estado,
@@ -21,7 +30,9 @@ exports.getAllEquipos = async (req, res) => {
       FROM equipos e
       LEFT JOIN sedes s ON e.sede_id = s.id
       LEFT JOIN niveles n ON e.nivel_id = n.id
-      ORDER BY e.nombre ASC`
+      ${whereClause}
+      ORDER BY e.nombre ASC`,
+      params
     );
     res.json(result.rows);
   } catch (err) {
