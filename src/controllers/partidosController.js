@@ -566,7 +566,11 @@ exports.getMisPartidos = async (req, res) => {
                 n.nombre as nivel_nombre,
                 s.nombre as sede_nombre,
                 COALESCE(ea.nombre, p.equipo_a_placeholder_desc, 'A confirmar') as equipo_a_nombre,
+                ea.logo_url as equipo_a_logo,
                 COALESCE(eb.nombre, p.equipo_b_placeholder_desc, 'A confirmar') as equipo_b_nombre,
+                eb.logo_url as equipo_b_logo,
+                (SELECT u.telefono FROM usuarios u WHERE u.id = ea.delegado_id) as delegado_a_telefono,
+                (SELECT u.telefono FROM usuarios u WHERE u.id = eb.delegado_id) as delegado_b_telefono,
                 (SELECT COALESCE(json_agg(sp.* ORDER BY sp.numero_set), '[]') FROM sets_partido sp WHERE sp.partido_id = p.id) as sets
             FROM partidos p
             JOIN torneos t ON p.torneo_id = t.id
@@ -615,7 +619,9 @@ exports.getPartidosDelegado = async (req, res) => {
                 n.nombre as nivel_nombre,
                 s.nombre as sede_nombre,
                 ea.nombre as equipo_a_nombre,
+                ea.logo_url as equipo_a_logo,
                 eb.nombre as equipo_b_nombre,
+                eb.logo_url as equipo_b_logo,
                 (SELECT COALESCE(json_agg(sp.* ORDER BY sp.numero_set), '[]') FROM sets_partido sp WHERE sp.partido_id = p.id) as sets
             FROM partidos p
             JOIN torneos t ON p.torneo_id = t.id
