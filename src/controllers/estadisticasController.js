@@ -181,3 +181,79 @@ exports.getGanadoresDeGrupos = async (req, res) => {
     res.status(500).json({ message: 'Error al obtener los ganadores de los grupos' });
   }
 };
+
+// Obtener las tablas de posiciones de los niveles donde participa un delegado
+exports.getMisTablasPosiciones = async (req, res) => {
+  try {
+    const delegadoId = req.user.id;
+
+    // 1. Obtener los equipos del delegado que están en un nivel
+    const misEquiposResult = await pool.query(
+      `SELECT id, nivel_id FROM equipos WHERE delegado_id = $1 AND nivel_id IS NOT NULL`,
+      [delegadoId]
+    );
+
+    const misEquipos = misEquiposResult.rows;
+
+    if (misEquipos.length === 0) {
+      return res.json([]); // No hay equipos en niveles
+    }
+
+    const myTeamIds = new Set(misEquipos.map(e => e.id));
+    const uniqueNivelIds = [...new Set(misEquipos.map(e => e.nivel_id))];
+    
+    const result = [];
+
+    for (const nivelId of uniqueNivelIds) {
+      // Obtener nombre del nivel
+      const nivelRes = await pool.query('SELECT nombre FROM niveles WHERE id = $1', [nivelId]);
+      const nivelNombre = nivelRes.rows[0]?.nombre || 'Nivel Desconocido';
+
+      // Obtener estadísticas completas del nivel
+      const statsResult = await pool.query(`
+        SELECT 
+          st.equipo_id, 
+          eq.nombre as club_nombre, 
+          eq.logo_url as club_logo, 
+          eq.nombre_extra,
+          st.puntos_tabla, 
+          st.partidos_jugados, 
+          st.partidos_ganados, 
+          st.partidos_perdidos,
+          st.sets_ganados,
+          st.sets_perdidos,
+          st.puntos_favor,
+          st.puntos_contra
+        FROM estadisticas_equipos st
+        JOIN equipos eq ON st.equipo_id = eq.id
+        WHERE st.nivel_id = $1
+      `, [nivelId]);
+
+      const matchesResult = await pool.query(
+        `SELECT equipo_a_id, equipo_b_id, resultado_equipo_a, resultado_equipo_b
+         FROM partidos WHERE nivel_id = $1 AND estado = 'finalizado'`,
+        [nivelId]
+      );
+      
+      const sortedTable = sortTeams(statsResult.rows, matchesResult.rows);
+
+      // Marcar equipos del delegado y asignar posición
+      const tablaFinal = sortedTable.map((t, index) => ({
+        posicion: index + 1,
+        ...t,
+        es_mi_equipo: myTeamIds.has(t.equipo_id)
+      }));
+
+      result.push({
+        nivel_id: nivelId,
+        nivel_nombre: nivelNombre,
+        tabla: tablaFinal
+      });
+    }
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error en getMisTablasPosiciones:', error);
+    res.status(500).json({ message: 'Error al obtener las tablas de posiciones' });
+  }
+};

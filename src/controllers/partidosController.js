@@ -24,6 +24,16 @@ exports.createFixture = async (req, res) => {
 
     await client.query('BEGIN');
 
+    // 1.5. Asegurar que todos los equipos tengan su registro en la tabla de posiciones
+    // Esto garantiza que el equipo aparezca en la tabla aunque se haya agregado manualmente o tarde
+    for (const eqId of equipo_ids) {
+        await client.query(`
+            INSERT INTO estadisticas_equipos (equipo_id, nivel_id, torneo_id, partidos_jugados, partidos_ganados, partidos_perdidos, sets_ganados, sets_perdidos, puntos_favor, puntos_contra, puntos_tabla)
+            VALUES ($1, $2, $3, 0, 0, 0, 0, 0, 0, 0, 0)
+            ON CONFLICT (equipo_id, nivel_id) DO NOTHING
+        `, [eqId, nivel_id, torneo_id]);
+    }
+
     // 2. Eliminar partidos pendientes anteriores de este nivel (limpieza)
     await client.query("DELETE FROM partidos WHERE nivel_id = $1 AND estado = 'pendiente'", [nivel_id]);
 
