@@ -2,6 +2,17 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/database');
 
+// Función para normalizar el username
+const normalizeUsername = (str) => {
+  if (!str) return '';
+  // Convierte a minúsculas, quita acentos, quita espacios y finalmente quita cualquier caracter no alfanumérico.
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, '');
+};
+
 // Login
 const login = async (req, res) => {
   try {
@@ -15,10 +26,12 @@ const login = async (req, res) => {
       });
     }
 
+    const normalizedUsername = normalizeUsername(username);
+
     // Buscar usuario por username
     const result = await pool.query(
       'SELECT * FROM usuarios WHERE username = $1 AND estado = $2',
-      [username, 'activo']
+      [normalizedUsername, 'activo']
     );
 
     if (result.rows.length === 0) {

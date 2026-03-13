@@ -1,6 +1,17 @@
 const pool = require('../config/database');
 const bcrypt = require('bcryptjs');
 
+// Función para normalizar el username
+const normalizeUsername = (str) => {
+  if (!str) return '';
+  // Convierte a minúsculas, quita acentos, quita espacios y finalmente quita cualquier caracter no alfanumérico.
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, '');
+};
+
 // Obtener todos los árbitros
 exports.getArbitros = async (req, res) => {
   try {
@@ -27,8 +38,10 @@ exports.createArbitro = async (req, res) => {
       return res.status(400).json({ error: 'Nombre y usuario son requeridos' });
     }
 
+    const normalizedUsername = normalizeUsername(username);
+
     // Verificar si el usuario ya existe
-    const userCheck = await pool.query('SELECT id FROM usuarios WHERE username = $1', [username]);
+    const userCheck = await pool.query('SELECT id FROM usuarios WHERE username = $1', [normalizedUsername]);
     if (userCheck.rows.length > 0) {
       return res.status(400).json({ error: 'El nombre de usuario ya está en uso' });
     }
@@ -42,7 +55,7 @@ exports.createArbitro = async (req, res) => {
       `INSERT INTO usuarios (nombre, username, password, role, estado, password_reset, created_at)
        VALUES ($1, $2, $3, 'arbitro', 'activo', TRUE, NOW())
        RETURNING id, nombre, username, role, estado`,
-      [nombre, username, hashedPassword]
+      [nombre, normalizedUsername, hashedPassword]
     );
 
     res.status(201).json(result.rows[0]);
@@ -58,6 +71,8 @@ exports.updateUsuario = async (req, res) => {
     const { id } = req.params;
     const { nombre, username } = req.body;
 
+    const normalizedUsername = username ? normalizeUsername(username) : undefined;
+
     const result = await pool.query(
       `UPDATE usuarios 
        SET nombre = COALESCE($1, nombre),
@@ -65,7 +80,7 @@ exports.updateUsuario = async (req, res) => {
            updated_at = NOW()
        WHERE id = $3
        RETURNING id, nombre, username, role, estado`,
-      [nombre, username, id]
+      [nombre, normalizedUsername, id]
     );
 
     if (result.rows.length === 0) {
@@ -174,8 +189,10 @@ exports.createDelegado = async (req, res) => {
 
     await client.query('BEGIN');
 
+    const normalizedUsername = normalizeUsername(username);
+
     // Verificar usuario
-    const userCheck = await client.query('SELECT id FROM usuarios WHERE username = $1', [username]);
+    const userCheck = await client.query('SELECT id FROM usuarios WHERE username = $1', [normalizedUsername]);
     if (userCheck.rows.length > 0) {
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'El nombre de usuario ya está en uso' });
@@ -190,7 +207,7 @@ exports.createDelegado = async (req, res) => {
       `INSERT INTO usuarios (nombre, username, password, role, estado, telefono, password_reset, created_at)
        VALUES ($1, $2, $3, 'delegado', 'activo', $4, TRUE, NOW())
        RETURNING id, nombre, username, role, estado`,
-      [nombre, username, hashedPassword, telefono || null]
+      [nombre, normalizedUsername, hashedPassword, telefono || null]
     );
     const newUser = userResult.rows[0];
 
@@ -260,7 +277,10 @@ exports.updateDelegado = async (req, res) => {
     let pCount = 1;
 
     if (nombre !== undefined) { userFields.push(`nombre = $${pCount++}`); userValues.push(nombre); }
-    if (username !== undefined) { userFields.push(`username = $${pCount++}`); userValues.push(username); }
+    if (username !== undefined) { 
+      userFields.push(`username = $${pCount++}`); 
+      userValues.push(normalizeUsername(username)); 
+    }
     if (telefono !== undefined) { userFields.push(`telefono = $${pCount++}`); userValues.push(telefono); }
     
     userValues.push(id);
