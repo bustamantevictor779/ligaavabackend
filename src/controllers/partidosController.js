@@ -446,7 +446,15 @@ exports.updatePartido = async (req, res) => {
             values.push(value);
         };
 
-        if (fecha !== undefined) pushField('fecha', fecha || null);
+        const normalizeDateString = (input) => {
+            if (!input) return null;
+            if (typeof input === 'string' && input.includes('T')) {
+                return input.split('T')[0];
+            }
+            return input;
+        };
+
+        if (fecha !== undefined) pushField('fecha', normalizeDateString(fecha));
         if (horario !== undefined) pushField('horario', horario || null);
         if (sede_id !== undefined) pushField('sede_id', sede_id || null);
         if (arbitro_id !== undefined) pushField('arbitro_id', arbitro_id || null);
@@ -533,6 +541,16 @@ exports.createPartido = async (req, res) => {
     const maxNumResult = await pool.query('SELECT COALESCE(MAX(numero_partido), 0) as max_num FROM partidos WHERE nivel_id = $1', [nivel_id]);
     const nextNum = parseInt(maxNumResult.rows[0].max_num) + 1;
 
+    const normalizeDateString = (input) => {
+      if (!input) return null;
+      if (typeof input === 'string' && input.includes('T')) {
+        return input.split('T')[0];
+      }
+      return input;
+    };
+
+    const safeFecha = normalizeDateString(fecha);
+
     const result = await pool.query(
       `INSERT INTO partidos (
           torneo_id, nivel_id, 
@@ -548,7 +566,7 @@ exports.createPartido = async (req, res) => {
         equipo_a_id || null, equipo_b_id || null, 
         equipo_a_source_partido_id || null, equipo_b_source_partido_id || null, 
         equipo_a_placeholder_desc || null, equipo_b_placeholder_desc || null, 
-        estado, instanciaNormalized, nextNum, fecha || null, horario || null, 
+        estado, instanciaNormalized, nextNum, safeFecha, horario || null, 
         sede_id || null, arbitro_id || null
       ]
     );
@@ -852,24 +870,11 @@ exports.adminUpdateResult = async (req, res) => {
     }
 };
 
-// Helper para loggear a consola y archivo
-const writeLog = (message) => {
-    const logMessage = `${new Date().toISOString()} - ${message}\n`;
-    console.log(logMessage.trim());
-    try {
-        fs.appendFileSync(logFile, logMessage);
-    } catch (err) {
-        console.error('FALLO AL ESCRIBIR LOG:', err);
-    }
-};
-
 // Registrar o actualizar un set (Usado por Árbitros)
 exports.registrarSet = async (req, res) => {
     const client = await pool.connect();
-    writeLog(`\n📥 [ARBITRO] Registrando set para partido ID: ${req.body.partido_id}`);
     try {
         const { partido_id, numero_set, puntos_equipo_a, puntos_equipo_b } = req.body;
-
         if (!partido_id || !numero_set) {
             return res.status(400).json({ message: 'Faltan datos del set.' });
         }
@@ -900,7 +905,6 @@ exports.registrarSet = async (req, res) => {
         let nuevoEstado = 'en_curso';
         if (setsA === 3 || setsB === 3) {
             nuevoEstado = 'finalizado';
-            writeLog(`🏁 [ARBITRO] Partido ${partido_id} FINALIZADO. Resultado: ${setsA}-${setsB}`);
         }
 
         // 3. Actualizar estado y resultado global del partido
@@ -911,7 +915,6 @@ exports.registrarSet = async (req, res) => {
 
         // 4. Si el partido finalizó, disparar toda la lógica de torneos
         if (nuevoEstado === 'finalizado') {
-            writeLog('🔄 [ARBITRO] Recalculando estadísticas y verificando fases...');
             await recalculateLevelStats(client, nivel_id);
 
             // Propagar ganador a placeholders (si existen) para las rondas siguientes
@@ -923,8 +926,6 @@ exports.registrarSet = async (req, res) => {
 
             await checkAndCreateFinal(client, nivel_id);
             await checkAndSetChampion(client, nivel_id);
-        } else {
-            writeLog(`ℹ️ [ARBITRO] Partido ${partido_id} sigue en curso. No se verifica la fase final.`);
         }
 
         await client.query('COMMIT');
@@ -932,7 +933,6 @@ exports.registrarSet = async (req, res) => {
 
     } catch (error) {
         await client.query('ROLLBACK');
-        writeLog(`🔥 [ARBITRO] ERROR CRÍTICO registrando set: ${error.message}`);
         res.status(500).json({ message: 'Error al registrar el set: ' + error.message });
     } finally {
         client.release();
