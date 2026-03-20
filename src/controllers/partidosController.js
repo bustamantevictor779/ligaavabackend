@@ -333,7 +333,7 @@ exports.getAllPartidos = async (req, res) => {
         const { onlyActive } = req.query;
         let query = `
             SELECT 
-                p.id, p.fecha, p.horario, p.estado, p.resultado_equipo_a, p.resultado_equipo_b,
+                p.id, to_char(p.fecha::date, 'YYYY-MM-DD') as fecha, p.horario, p.estado, p.resultado_equipo_a, p.resultado_equipo_b,
                 p.sede_id, p.arbitro_id, p.numero_partido,
                 p.torneo_id, p.nivel_id, p.instancia,
                 p.equipo_a_id, p.equipo_b_id,
@@ -587,7 +587,7 @@ exports.getMisPartidos = async (req, res) => {
         const arbitroId = req.user.id; // Obtenido del token
         const result = await pool.query(`
             SELECT 
-                p.id, p.fecha, p.horario, p.estado, 
+                p.id, to_char(p.fecha::date, 'YYYY-MM-DD') as fecha, p.horario, p.estado, 
                 p.resultado_equipo_a, p.resultado_equipo_b,
                 p.equipo_a_id, p.equipo_b_id, p.numero_partido,
                 p.instancia, t.nombre as torneo_nombre,
@@ -640,7 +640,7 @@ exports.getPartidosDelegado = async (req, res) => {
         const userId = req.user.id;
         const result = await pool.query(`
             SELECT 
-                p.id, p.fecha, p.horario, p.estado, 
+                p.id, to_char(p.fecha::date, 'YYYY-MM-DD') as fecha, p.horario, p.estado, 
                 p.resultado_equipo_a, p.resultado_equipo_b,
                 p.equipo_a_id, p.equipo_b_id, p.numero_partido,
                 p.instancia, t.nombre as torneo_nombre,
