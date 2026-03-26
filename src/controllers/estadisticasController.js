@@ -30,29 +30,29 @@ const sortTeams = (teams, matches) => {
       }
     }
 
-    // 3. Sets a favor (Prioridad 3)
-    const sgA = Number(a.sets_ganados) || 0;
-    const sgB = Number(b.sets_ganados) || 0;
-    if (sgB !== sgA) {
-      return sgB - sgA;
-    }
-
-    // 4. Puntos a favor (Prioridad 4)
-    const pfA = Number(a.puntos_favor) || 0;
-    const pfB = Number(b.puntos_favor) || 0;
-    if (pfB !== pfA) {
-      return pfB - pfA;
-    }
-
-    // 5. Fallback: Diferencia de Sets
+    // 3. Diferencia de Sets (Prioridad 3 - Reemplaza a Sets a Favor)
     const dsA = (Number(a.sets_ganados) || 0) - (Number(a.sets_perdidos) || 0);
     const dsB = (Number(b.sets_ganados) || 0) - (Number(b.sets_perdidos) || 0);
-    if (dsB !== dsA) return dsB - dsA;
+    if (dsB !== dsA) {
+      return dsB - dsA;
+    }
 
-    // 6. Fallback final: Diferencia de Puntos
+    // 4. Diferencia de Puntos (Prioridad 4)
     const dpA = (Number(a.puntos_favor) || 0) - (Number(a.puntos_contra) || 0);
     const dpB = (Number(b.puntos_favor) || 0) - (Number(b.puntos_contra) || 0);
-    return dpB - dpA;
+    if (dpB !== dpA) {
+      return dpB - dpA;
+    }
+
+    // 5. Fallback: Sets a favor
+    const sgA = Number(a.sets_ganados) || 0;
+    const sgB = Number(b.sets_ganados) || 0;
+    if (sgB !== sgA) return sgB - sgA;
+
+    // 6. Fallback final: Puntos a favor
+    const pfA = Number(a.puntos_favor) || 0;
+    const pfB = Number(b.puntos_favor) || 0;
+    return pfB - pfA;
   });
 };
 
