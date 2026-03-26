@@ -10,7 +10,15 @@ const sortTeams = (teams, matches) => {
       return ptsB - ptsA;
     }
 
-    // 2. Partido entre sí (Head-to-head - Prioridad 2)
+    // 2. Diferencia de Sets (Prioridad 2 - Total Sets / TS)
+    // Corregimos la jerarquía para que la diferencia de sets (ganados - perdidos) sea el primer desempate
+    const dsA = (Number(a.sets_ganados) || 0) - (Number(a.sets_perdidos) || 0);
+    const dsB = (Number(b.sets_ganados) || 0) - (Number(b.sets_perdidos) || 0);
+    if (dsB !== dsA) {
+      return dsB - dsA;
+    }
+
+    // 3. Partido entre sí (Head-to-head - Prioridad 3)
     // Buscamos si jugaron un partido finalizado entre ellos
     const match = matches.find(m =>
       (Number(m.equipo_a_id) === Number(a.equipo_id) && Number(m.equipo_b_id) === Number(b.equipo_id)) ||
@@ -30,29 +38,22 @@ const sortTeams = (teams, matches) => {
       }
     }
 
-    // 3. Diferencia de Sets (Prioridad 3 - Reemplaza a Sets a Favor)
-    const dsA = (Number(a.sets_ganados) || 0) - (Number(a.sets_perdidos) || 0);
-    const dsB = (Number(b.sets_ganados) || 0) - (Number(b.sets_perdidos) || 0);
-    if (dsB !== dsA) {
-      return dsB - dsA;
-    }
-
-    // 4. Diferencia de Puntos (Prioridad 4)
-    const dpA = (Number(a.puntos_favor) || 0) - (Number(a.puntos_contra) || 0);
-    const dpB = (Number(b.puntos_favor) || 0) - (Number(b.puntos_contra) || 0);
-    if (dpB !== dpA) {
-      return dpB - dpA;
-    }
-
-    // 5. Fallback: Sets a favor
-    const sgA = Number(a.sets_ganados) || 0;
-    const sgB = Number(b.sets_ganados) || 0;
-    if (sgB !== sgA) return sgB - sgA;
-
-    // 6. Fallback final: Puntos a favor
+    // 4. Puntos a favor (Prioridad 4)
     const pfA = Number(a.puntos_favor) || 0;
     const pfB = Number(b.puntos_favor) || 0;
-    return pfB - pfA;
+    if (pfB !== pfA) {
+      return pfB - pfA;
+    }
+
+    // 5. Fallback: Diferencia de Puntos
+    const dpA = (Number(a.puntos_favor) || 0) - (Number(a.puntos_contra) || 0);
+    const dpB = (Number(b.puntos_favor) || 0) - (Number(b.puntos_contra) || 0);
+    if (dpB !== dpA) return dpB - dpA;
+
+    // 6. Fallback final: Sets a favor
+    const sgA = Number(a.sets_ganados) || 0;
+    const sgB = Number(b.sets_ganados) || 0;
+    return sgB - sgA;
   });
 };
 
