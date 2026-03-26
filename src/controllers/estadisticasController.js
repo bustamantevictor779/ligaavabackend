@@ -3,46 +3,56 @@ const pool = require('../config/database');
 // Función auxiliar para ordenar equipos según reglas personalizadas
 const sortTeams = (teams, matches) => {
   return teams.sort((a, b) => {
-    // 1. Puntos en la tabla (Mayor es mejor)
-    if (b.puntos_tabla !== a.puntos_tabla) {
-      return b.puntos_tabla - a.puntos_tabla;
+    // 1. Puntos en la tabla (Prioridad 1)
+    const ptsA = Number(a.puntos_tabla) || 0;
+    const ptsB = Number(b.puntos_tabla) || 0;
+    if (ptsB !== ptsA) {
+      return ptsB - ptsA;
     }
 
-    // 2. Partido entre sí (Head-to-head)
+    // 2. Partido entre sí (Head-to-head - Prioridad 2)
     // Buscamos si jugaron un partido finalizado entre ellos
-    const match = matches.find(m => 
-      (m.equipo_a_id === a.equipo_id && m.equipo_b_id === b.equipo_id) ||
-      (m.equipo_a_id === b.equipo_id && m.equipo_b_id === a.equipo_id)
+    const match = matches.find(m =>
+      (Number(m.equipo_a_id) === Number(a.equipo_id) && Number(m.equipo_b_id) === Number(b.equipo_id)) ||
+      (Number(m.equipo_a_id) === Number(b.equipo_id) && Number(m.equipo_b_id) === Number(a.equipo_id))
     );
 
     if (match) {
       let winnerId = null;
-      if (match.resultado_equipo_a > match.resultado_equipo_b) winnerId = match.equipo_a_id;
-      else if (match.resultado_equipo_b > match.resultado_equipo_a) winnerId = match.equipo_b_id;
+      const resA = Number(match.resultado_equipo_a) || 0;
+      const resB = Number(match.resultado_equipo_b) || 0;
+      if (resA > resB) winnerId = match.equipo_a_id;
+      else if (resB > resA) winnerId = match.equipo_b_id;
       
       if (winnerId) {
-        // Si A ganó, A va primero (-1)
-        if (winnerId === a.equipo_id) return -1;
-        if (winnerId === b.equipo_id) return 1;
+        if (Number(winnerId) === Number(a.equipo_id)) return -1;
+        if (Number(winnerId) === Number(b.equipo_id)) return 1;
       }
     }
 
-    // 3. Sets Positivos / Sets Ganados (Mayor es mejor)
-    if (b.sets_ganados !== a.sets_ganados) {
-      return b.sets_ganados - a.sets_ganados;
+    // 3. Sets a favor (Prioridad 3)
+    const sgA = Number(a.sets_ganados) || 0;
+    const sgB = Number(b.sets_ganados) || 0;
+    if (sgB !== sgA) {
+      return sgB - sgA;
     }
 
-    // 4. Diferencia de Sets (Fallback estándar)
-    const diffSetsA = a.sets_ganados - a.sets_perdidos;
-    const diffSetsB = b.sets_ganados - b.sets_perdidos;
-    if (diffSetsB !== diffSetsA) {
-      return diffSetsB - diffSetsA;
+    // 4. Puntos a favor (Prioridad 4)
+    const pfA = Number(a.puntos_favor) || 0;
+    const pfB = Number(b.puntos_favor) || 0;
+    if (pfB !== pfA) {
+      return pfB - pfA;
     }
 
-    // 5. Diferencia de Puntos (Fallback final)
-    const diffPuntosA = a.puntos_favor - a.puntos_contra;
-    const diffPuntosB = b.puntos_favor - b.puntos_contra;
-    return diffPuntosB - diffPuntosA;
+    // 5. Fallback: Diferencia de Sets
+    const dsA = (Number(a.sets_ganados) || 0) - (Number(a.sets_perdidos) || 0);
+    const dsB = (Number(b.sets_ganados) || 0) - (Number(b.sets_perdidos) || 0);
+    if (dsB !== dsA) return dsB - dsA;
+
+    // 6. Fallback final: Diferencia de Puntos
+    const dpA = (Number(a.puntos_favor) || 0) - (Number(a.puntos_contra) || 0);
+    const dpB = (Number(b.puntos_favor) || 0) - (Number(b.puntos_contra) || 0);
+    return dpB - dpA;
   });
 };
 
