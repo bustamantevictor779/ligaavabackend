@@ -89,3 +89,21 @@ exports.deleteJugador = async (req, res) => {
     res.status(500).json({ error: 'Error al eliminar jugador' });
   }
 };
+
+// Eliminar todos los jugadores de un equipo (Borrar lista de buena fe)
+exports.deleteJugadoresByEquipo = async (req, res) => {
+  try {
+    console.log('Petición DELETE recibida para el equipo:', req.params.equipoId);
+    const { equipoId } = req.params;
+    const result = await pool.query('DELETE FROM jugadores WHERE equipo_id = $1', [equipoId]);
+    
+    res.json({ 
+      success: true,
+      message: 'Lista de jugadores eliminada correctamente',
+      count: result.rowCount 
+    });
+  } catch (err) {
+    console.error('Error al borrar lista de jugadores:', err);
+    res.status(500).json({ error: 'Error al eliminar la lista de buena fe' });
+  }
+};
