@@ -24,10 +24,10 @@ exports.createJugador = async (req, res) => {
       return res.status(400).json({ error: 'Todos los campos son requeridos' });
     }
 
-    // Validar límite de 18 jugadores
+    // Validar límite de 21 jugadores
     const countResult = await pool.query('SELECT COUNT(*) FROM jugadores WHERE equipo_id = $1', [equipo_id]);
-    if (parseInt(countResult.rows[0].count) >= 18) {
-      return res.status(400).json({ error: 'El equipo ya tiene el máximo de 18 jugadores' });
+    if (parseInt(countResult.rows[0].count) >= 21) {
+      return res.status(400).json({ error: 'El equipo ya tiene el máximo de 21 jugadores' });
     }
 
     // Validar DNI único (opcional, pero recomendado si la BD tiene constraint)
