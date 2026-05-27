@@ -6,6 +6,7 @@ const { verifyToken } = require('../middleware/auth');
 // Rutas
 router.get('/', partidosController.getAllPartidos);
 router.post('/fixture', verifyToken, partidosController.createFixture);
+router.post('/fixture-ida-vuelta', verifyToken, partidosController.createFixtureIdaVuelta);
 router.post('/', verifyToken, partidosController.createPartido);
 router.get('/mis-partidos', verifyToken, partidosController.getMisPartidos);
 router.get('/mis-fechas', verifyToken, partidosController.getFechasConPartidosArbitro);

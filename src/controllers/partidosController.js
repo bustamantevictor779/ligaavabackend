@@ -95,6 +95,82 @@ exports.createFixture = async (req, res) => {
     client.release();
   }
 };
+
+/**
+ * Genera un fixture de "ida y vuelta".
+ * Asegura que cada equipo juegue contra todos los demás dos veces (una como local y otra como visitante).
+ */
+exports.createFixtureIdaVuelta = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { nivel_id, equipo_ids } = req.body;
+
+    if (!nivel_id || !equipo_ids || !Array.isArray(equipo_ids) || equipo_ids.length < 2) {
+      return res.status(400).json({ message: 'Se requiere un nivel_id y al menos 2 equipos.' });
+    }
+
+    const nivelResult = await client.query('SELECT torneo_id FROM niveles WHERE id = $1', [nivel_id]);
+    if (nivelResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Nivel no encontrado.' });
+    }
+    const torneo_id = nivelResult.rows[0].torneo_id;
+
+    await client.query('BEGIN');
+
+    // Obtenemos enfrentamientos existentes para no duplicar si se presiona varias veces
+    const existingMatchesRes = await client.query(
+      'SELECT equipo_a_id, equipo_b_id FROM partidos WHERE nivel_id = $1', 
+      [nivel_id]
+    );
+    
+    const matchCount = {};
+    existingMatchesRes.rows.forEach(m => {
+        const key = `${m.equipo_a_id}-${m.equipo_b_id}`;
+        matchCount[key] = (matchCount[key] || 0) + 1;
+    });
+
+    const maxNumResult = await client.query('SELECT COALESCE(MAX(numero_partido), 0) as max_num FROM partidos WHERE nivel_id = $1', [nivel_id]);
+    let currentNum = parseInt(maxNumResult.rows[0].max_num);
+
+    const partidosParaInsertar = [];
+    // Generar todas las combinaciones posibles (A vs B y B vs A)
+    for (let i = 0; i < equipo_ids.length; i++) {
+      for (let j = 0; j < equipo_ids.length; j++) {
+        if (i === j) continue; // No juegan contra sí mismos
+
+        const idA = equipo_ids[i];
+        const idB = equipo_ids[j];
+        
+        // Si este cruce específico no existe (A local, B visitante), lo agregamos
+        if (!matchCount[`${idA}-${idB}`]) {
+            partidosParaInsertar.push([idA, idB]);
+        }
+      }
+    }
+
+    const query = `
+      INSERT INTO partidos (equipo_a_id, equipo_b_id, nivel_id, torneo_id, estado, numero_partido)
+      VALUES ($1, $2, $3, $4, 'pendiente', $5)
+    `;
+
+    // Mezclar para que los nuevos partidos no queden ordenados alfabéticamente por equipo
+    const shuffled = partidosParaInsertar.sort(() => Math.random() - 0.5);
+    for (const partido of shuffled) {
+      currentNum++;
+      await client.query(query, [partido[0], partido[1], nivel_id, torneo_id, currentNum]);
+    }
+
+    await recalculateMatchNumbers(client, nivel_id);
+    await client.query('COMMIT');
+    res.status(201).json({ message: `Se agregaron ${shuffled.length} partidos para completar la modalidad ida y vuelta.` });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ message: 'Error al generar fixture: ' + error.message });
+  } finally {
+    client.release();
+  }
+};
+
 // Función auxiliar para recalcular números de partido
 // Ordena por Fecha -> Hora -> ID y actualiza la secuencia
 const recalculateMatchNumbers = async (executor, nivel_id) => {
