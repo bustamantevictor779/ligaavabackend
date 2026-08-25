@@ -8,9 +8,9 @@ const sortTeams = (teams, matches) => {
     const ptsB = Number(b.puntos_tabla) || 0;
     if (ptsB !== ptsA) {
       return ptsB - ptsA;
-    } 
+    }
 
-        // 3. Partido entre sí (Head-to-head - Prioridad 3)
+    // 3. Partido entre sí (Head-to-head - Prioridad 3)
     // Buscamos si jugaron un partido finalizado entre ellos
     const match = matches.find(m =>
       (Number(m.equipo_a_id) === Number(a.equipo_id) && Number(m.equipo_b_id) === Number(b.equipo_id)) ||
@@ -37,7 +37,6 @@ const sortTeams = (teams, matches) => {
     if (dsB !== dsA) {
       return dsB - dsA;
     }
-
 
 
     // 4. Puntos a favor (Prioridad 4)
@@ -122,7 +121,19 @@ exports.getGanadoresDeGrupos = async (req, res) => {
     `;
     
     const descendantsResult = await pool.query(descendantsQuery, [parentNivelId]);
-    const activeLevelIds = descendantsResult.rows.map(r => r.id);
+    let activeLevelIds = descendantsResult.rows.map(r => r.id);
+
+    if (activeLevelIds.length === 0) {
+      const parentTeamsResult = await pool.query(
+        'SELECT 1 FROM equipos WHERE nivel_id = $1 LIMIT 1',
+        [parentNivelId]
+      );
+
+      if (parentTeamsResult.rows.length > 0) {
+        activeLevelIds = [Number(parentNivelId)];
+      }
+    }
+
     const numGrupos = activeLevelIds.length;
 
     if (numGrupos === 0) return res.json([]);
@@ -135,15 +146,16 @@ exports.getGanadoresDeGrupos = async (req, res) => {
           eq.nombre as club_nombre,
           eq.nombre_extra,
           n.nombre as nivel_nombre,
-          st.puntos_tabla,
-          st.sets_ganados,
-          st.sets_perdidos,
-          st.puntos_favor,
-          st.puntos_contra
-        FROM estadisticas_equipos st
-        JOIN equipos eq ON st.equipo_id = eq.id
-        JOIN niveles n ON st.nivel_id = n.id
-        WHERE st.nivel_id = ANY($1::int[])
+          COALESCE(st.puntos_tabla, 0) AS puntos_tabla,
+          COALESCE(st.sets_ganados, 0) AS sets_ganados,
+          COALESCE(st.sets_perdidos, 0) AS sets_perdidos,
+          COALESCE(st.puntos_favor, 0) AS puntos_favor,
+          COALESCE(st.puntos_contra, 0) AS puntos_contra
+        FROM equipos eq
+        JOIN niveles n ON eq.nivel_id = n.id
+        LEFT JOIN estadisticas_equipos st
+          ON st.equipo_id = eq.id AND st.nivel_id = n.id
+        WHERE eq.nivel_id = ANY($1::int[])
     `, [activeLevelIds]);
 
     // 3. Obtener partidos para desempate
