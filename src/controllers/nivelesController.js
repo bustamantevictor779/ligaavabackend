@@ -55,19 +55,29 @@ exports.createNivel = async (req, res) => {
 exports.updateNivel = async (req, res) => {
   try {
     const { id } = req.params;
-    const { nombre, categoria, estado, nivel_padre_id, campeon_id } = req.body;
+    const allowedFields = ['nombre', 'categoria', 'estado', 'nivel_padre_id', 'campeon_id'];
+    const fields = [];
+    const values = [];
+
+    allowedFields.forEach(field => {
+      if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+        values.push(req.body[field]);
+        fields.push(`${field} = $${values.length}`);
+      }
+    });
+
+    if (fields.length === 0) {
+      return res.status(400).json({ error: 'No se enviaron campos para actualizar' });
+    }
+
+    values.push(id);
 
     const result = await pool.query(
       `UPDATE niveles 
-       SET 
-         nombre = COALESCE($1, nombre),
-         categoria = COALESCE($2, categoria),
-         estado = COALESCE($3, estado),
-         nivel_padre_id = $4, -- Permitir setear a null
-         campeon_id = $5     -- Permitir setear a un valor o a null
-       WHERE id = $6
+       SET ${fields.join(', ')}
+       WHERE id = $${values.length}
        RETURNING *`,
-      [nombre, categoria, estado, nivel_padre_id, campeon_id, id]
+      values
     );
 
     if (result.rows.length === 0) {
