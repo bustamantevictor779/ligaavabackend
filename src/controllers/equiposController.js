@@ -19,6 +19,12 @@ exports.getAllEquipos = async (req, res) => {
         e.nombre, e.logo_url, e.sede_id,
         s.nombre as sede_nombre, s.ubicacion as sede_ubicacion,
         n.nombre as nivel_nombre, n.categoria as nivel_categoria,
+        COALESCE((
+          SELECT json_agg(json_build_object('id', historial_nivel.id, 'nombre', historial_nivel.nombre))
+          FROM estadisticas_equipos historial
+          JOIN niveles historial_nivel ON historial_nivel.id = historial.nivel_id
+          WHERE historial.equipo_id = e.id
+        ), '[]'::json) as niveles_con_estadisticas,
         e.delegado_id, -- Nueva columna
         (
           SELECT u.nombre FROM usuarios u WHERE u.id = e.delegado_id
