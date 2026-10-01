@@ -7,7 +7,13 @@ exports.getAllNiveles = async (req, res) => {
       `SELECT 
         n.*, 
         t.nombre as torneo_nombre,
-        c.nombre as campeon_nombre 
+          c.nombre as campeon_nombre,
+          (
+            SELECT COUNT(DISTINCT st.equipo_id)::int
+            FROM estadisticas_equipos st
+            JOIN equipos e ON e.id = st.equipo_id
+            WHERE st.nivel_id = n.id
+          ) as equipos_participantes_count
        FROM niveles n
        LEFT JOIN torneos t ON n.torneo_id = t.id
        LEFT JOIN equipos c ON n.campeon_id = c.id
