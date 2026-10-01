@@ -62,26 +62,27 @@ exports.getTablaPosiciones = async (req, res) => {
   try {
     const { nivelId } = req.params;
     
-    // 1. Obtener estadísticas de los equipos
+    // 1. Obtener únicamente equipos asignados actualmente a este nivel.
     const statsResult = await pool.query(`
       SELECT
         st.id,
-        st.equipo_id,
+        eq.id as equipo_id,
         eq.nombre as club_nombre,
         eq.logo_url as club_logo,
         eq.nombre_extra,
-        st.partidos_jugados,
-        st.partidos_ganados,
-        st.partidos_perdidos,
-        st.sets_ganados,
-        st.sets_perdidos,
-        st.puntos_favor,
-        st.puntos_contra,
-        st.puntos_tabla,
-        (st.puntos_favor - st.puntos_contra) as diferencia_puntos
-      FROM estadisticas_equipos st
-      JOIN equipos eq ON st.equipo_id = eq.id
-      WHERE st.nivel_id = $1
+        COALESCE(st.partidos_jugados, 0) as partidos_jugados,
+        COALESCE(st.partidos_ganados, 0) as partidos_ganados,
+        COALESCE(st.partidos_perdidos, 0) as partidos_perdidos,
+        COALESCE(st.sets_ganados, 0) as sets_ganados,
+        COALESCE(st.sets_perdidos, 0) as sets_perdidos,
+        COALESCE(st.puntos_favor, 0) as puntos_favor,
+        COALESCE(st.puntos_contra, 0) as puntos_contra,
+        COALESCE(st.puntos_tabla, 0) as puntos_tabla,
+        COALESCE(st.puntos_favor, 0) - COALESCE(st.puntos_contra, 0) as diferencia_puntos
+      FROM equipos eq
+      LEFT JOIN estadisticas_equipos st
+        ON st.equipo_id = eq.id AND st.nivel_id = $1
+      WHERE eq.nivel_id = $1
     `, [nivelId]);
 
     // 2. Obtener partidos finalizados de este nivel para el desempate
