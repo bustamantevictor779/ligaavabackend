@@ -2,6 +2,40 @@ const pool = require('../config/database');
 
 // Función auxiliar para ordenar equipos según reglas personalizadas
 const sortTeams = (teams, matches) => {
+  const teamsByTablePoints = new Map();
+  teams.forEach(team => {
+    const tablePoints = Number(team.puntos_tabla) || 0;
+    if (!teamsByTablePoints.has(tablePoints)) teamsByTablePoints.set(tablePoints, []);
+    teamsByTablePoints.get(tablePoints).push(team);
+  });
+
+  const headToHeadStats = new Map();
+  teamsByTablePoints.forEach(tiedTeams => {
+    const tiedTeamIds = new Set(tiedTeams.map(team => Number(team.equipo_id)));
+    tiedTeams.forEach(team => {
+      headToHeadStats.set(Number(team.equipo_id), { wins: 0, pointDifference: 0 });
+    });
+
+    matches.forEach(match => {
+      const teamAId = Number(match.equipo_a_id);
+      const teamBId = Number(match.equipo_b_id);
+      if (!tiedTeamIds.has(teamAId) || !tiedTeamIds.has(teamBId)) return;
+
+      const pointsA = Number(match.puntos_equipo_a) || 0;
+      const pointsB = Number(match.puntos_equipo_b) || 0;
+      const statsA = headToHeadStats.get(teamAId);
+      const statsB = headToHeadStats.get(teamBId);
+
+      statsA.pointDifference += pointsA - pointsB;
+      statsB.pointDifference += pointsB - pointsA;
+
+      const resultA = Number(match.resultado_equipo_a) || 0;
+      const resultB = Number(match.resultado_equipo_b) || 0;
+      if (resultA > resultB) statsA.wins++;
+      else if (resultB > resultA) statsB.wins++;
+    });
+  });
+
   return teams.sort((a, b) => {
     // 1. Puntos en la tabla (Prioridad 1)
     const ptsA = Number(a.puntos_tabla) || 0;
@@ -10,48 +44,42 @@ const sortTeams = (teams, matches) => {
       return ptsB - ptsA;
     }
 
-    // 3. Partido entre sí (Head-to-head - Prioridad 3)
-    // Buscamos si jugaron un partido finalizado entre ellos
-    const match = matches.find(m =>
-      (Number(m.equipo_a_id) === Number(a.equipo_id) && Number(m.equipo_b_id) === Number(b.equipo_id)) ||
-      (Number(m.equipo_a_id) === Number(b.equipo_id) && Number(m.equipo_b_id) === Number(a.equipo_id))
-    );
-
-    if (match) {
-      let winnerId = null;
-      const resA = Number(match.resultado_equipo_a) || 0;
-      const resB = Number(match.resultado_equipo_b) || 0;
-      if (resA > resB) winnerId = match.equipo_a_id;
-      else if (resB > resA) winnerId = match.equipo_b_id;
-      
-      if (winnerId) {
-        if (Number(winnerId) === Number(a.equipo_id)) return -1;
-        if (Number(winnerId) === Number(b.equipo_id)) return 1;
-      }
+    // 2. Partidos entre los equipos empatados (victorias directas)
+    const headToHeadA = headToHeadStats.get(Number(a.equipo_id));
+    const headToHeadB = headToHeadStats.get(Number(b.equipo_id));
+    const winsA = headToHeadA ? headToHeadA.wins : 0;
+    const winsB = headToHeadB ? headToHeadB.wins : 0;
+    if (winsA !== winsB) {
+      return winsB - winsA;
     }
 
-    // 2. Diferencia de Sets (Prioridad 2 - Total Sets / TS)
-    // Corregimos la jerarquía para que la diferencia de sets (ganados - perdidos) sea el primer desempate
+    // 3. Diferencia de puntos en los enfrentamientos directos
+    const pointDifferenceA = headToHeadA ? headToHeadA.pointDifference : 0;
+    const pointDifferenceB = headToHeadB ? headToHeadB.pointDifference : 0;
+    if (pointDifferenceA !== pointDifferenceB) {
+      return pointDifferenceB - pointDifferenceA;
+    }
+
+    // 4. Diferencia de Sets (Total Sets / TS)
     const dsA = (Number(a.sets_ganados) || 0) - (Number(a.sets_perdidos) || 0);
     const dsB = (Number(b.sets_ganados) || 0) - (Number(b.sets_perdidos) || 0);
     if (dsB !== dsA) {
       return dsB - dsA;
     }
 
-
-    // 4. Puntos a favor (Prioridad 4)
+    // 5. Puntos a favor
     const pfA = Number(a.puntos_favor) || 0;
     const pfB = Number(b.puntos_favor) || 0;
     if (pfB !== pfA) {
       return pfB - pfA;
     }
 
-    // 5. Fallback: Diferencia de Puntos
+    // 6. Diferencia de puntos general
     const dpA = (Number(a.puntos_favor) || 0) - (Number(a.puntos_contra) || 0);
     const dpB = (Number(b.puntos_favor) || 0) - (Number(b.puntos_contra) || 0);
     if (dpB !== dpA) return dpB - dpA;
 
-    // 6. Fallback final: Sets a favor
+    // 7. Sets a favor
     const sgA = Number(a.sets_ganados) || 0;
     const sgB = Number(b.sets_ganados) || 0;
     return sgB - sgA;
@@ -87,9 +115,11 @@ exports.getTablaPosiciones = async (req, res) => {
 
     // 2. Obtener partidos finalizados de este nivel para el desempate
     const matchesResult = await pool.query(`
-      SELECT equipo_a_id, equipo_b_id, resultado_equipo_a, resultado_equipo_b
-      FROM partidos
-      WHERE nivel_id = $1 AND estado = 'finalizado'
+      SELECT p.equipo_a_id, p.equipo_b_id, p.resultado_equipo_a, p.resultado_equipo_b,
+             COALESCE((SELECT SUM(sp.puntos_equipo_a) FROM sets_partido sp WHERE sp.partido_id = p.id), 0) AS puntos_equipo_a,
+             COALESCE((SELECT SUM(sp.puntos_equipo_b) FROM sets_partido sp WHERE sp.partido_id = p.id), 0) AS puntos_equipo_b
+      FROM partidos p
+      WHERE p.nivel_id = $1 AND p.estado = 'finalizado'
     `, [nivelId]);
 
     // 3. Ordenar usando la lógica personalizada
@@ -161,9 +191,11 @@ exports.getGanadoresDeGrupos = async (req, res) => {
 
     // 3. Obtener partidos para desempate
     const matchesResult = await pool.query(`
-      SELECT nivel_id, equipo_a_id, equipo_b_id, resultado_equipo_a, resultado_equipo_b
-      FROM partidos
-      WHERE nivel_id = ANY($1::int[]) AND estado = 'finalizado'
+      SELECT p.nivel_id, p.equipo_a_id, p.equipo_b_id, p.resultado_equipo_a, p.resultado_equipo_b,
+             COALESCE((SELECT SUM(sp.puntos_equipo_a) FROM sets_partido sp WHERE sp.partido_id = p.id), 0) AS puntos_equipo_a,
+             COALESCE((SELECT SUM(sp.puntos_equipo_b) FROM sets_partido sp WHERE sp.partido_id = p.id), 0) AS puntos_equipo_b
+      FROM partidos p
+      WHERE p.nivel_id = ANY($1::int[]) AND p.estado = 'finalizado'
     `, [activeLevelIds]);
 
     // 4. Agrupar por nivel, ordenar y seleccionar ganadores
@@ -256,8 +288,10 @@ exports.getMisTablasPosiciones = async (req, res) => {
       `, [nivelId]);
 
       const matchesResult = await pool.query(
-        `SELECT equipo_a_id, equipo_b_id, resultado_equipo_a, resultado_equipo_b
-         FROM partidos WHERE nivel_id = $1 AND estado = 'finalizado'`,
+        `SELECT p.equipo_a_id, p.equipo_b_id, p.resultado_equipo_a, p.resultado_equipo_b,
+                COALESCE((SELECT SUM(sp.puntos_equipo_a) FROM sets_partido sp WHERE sp.partido_id = p.id), 0) AS puntos_equipo_a,
+                COALESCE((SELECT SUM(sp.puntos_equipo_b) FROM sets_partido sp WHERE sp.partido_id = p.id), 0) AS puntos_equipo_b
+         FROM partidos p WHERE p.nivel_id = $1 AND p.estado = 'finalizado'`,
         [nivelId]
       );
       
